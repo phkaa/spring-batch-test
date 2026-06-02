@@ -22,7 +22,7 @@ spring:
     jdbc:
       initialize-schema: always
     job:
-      enabled: false
+      enabled: true
 
   h2:
     console:
@@ -31,5 +31,8 @@ spring:
 
 logging:
   level:
-    org.springframework.jdbc.datasource.init: DEBUG
-    com.zaxxer.hikari: DEBUG
+    org.springframework.jdbc.core.JdbcTemplate: DEBUG
+    org.springframework.batch.core: INFO
+    org.springframework.batch.core.step.AbstractStep: INFO
+    com.zaxxer.hikari: WARN
+    org.springframework.jdbc.core.StatementCreatorUtils: OFF

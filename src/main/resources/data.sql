@@ -1,4 +1,4 @@
-INSERT INTO users (username, email, password, created_at, updated_at)
+INSERT INTO raw_users (username, email, password, created_at, updated_at)
 SELECT
     'user' || x AS username,
     'user' || x || '@test.com' AS email,
