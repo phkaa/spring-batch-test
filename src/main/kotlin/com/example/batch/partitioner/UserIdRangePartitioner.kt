@@ -3,8 +3,9 @@ package com.example.batch.partitioner
 import org.springframework.batch.core.partition.Partitioner
 import org.springframework.batch.core.scope.context.StepSynchronizationManager
 import org.springframework.batch.infrastructure.item.ExecutionContext
+import org.springframework.beans.factory.annotation.Value
 
-class UserIdRangePartitioner(): Partitioner {
+class UserIdRangePartitioner: Partitioner {
     override fun partition(gridSize: Int): MutableMap<String, ExecutionContext> {
 
         val context = StepSynchronizationManager.getContext()
@@ -12,8 +13,8 @@ class UserIdRangePartitioner(): Partitioner {
 
         val jobExecution = context.stepExecution.jobExecution
 
-        val minId = jobExecution.jobParameters.getLong("minId") ?: 1L
         val maxId = jobExecution.executionContext.getLong("maxId")
+        val minId = jobExecution.jobParameters.getLong("minId") ?: 1L
 
         val result = mutableMapOf<String, ExecutionContext>()
 

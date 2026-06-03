@@ -2,6 +2,8 @@ package com.example.batch.config
 
 import com.example.batch.dto.RawUser
 import com.example.batch.dto.User
+import com.example.batch.listener.RawUserFailureListener
+import com.example.batch.listener.RawUserSuccessListener
 import com.example.batch.partitioner.UserIdRangePartitioner
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing
 import org.springframework.batch.core.configuration.annotation.StepScope
@@ -18,7 +20,7 @@ import org.springframework.batch.infrastructure.item.database.builder.JdbcBatchI
 import org.springframework.batch.infrastructure.item.database.support.H2PagingQueryProvider
 import org.springframework.batch.infrastructure.item.support.CompositeItemWriter
 import org.springframework.batch.infrastructure.repeat.RepeatStatus
-import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.transaction.PlatformTransactionManager
@@ -52,7 +54,7 @@ class PartitionUserMigrationBatchConfig {
                 val jdbc = JdbcTemplate(dataSource)
 
                 val maxId = jdbc.queryForObject(
-                    "SELECT COALESCE(MAX(id), 0) FROM raw_users",
+                    "SELECT COALESCE(MAX(id), 0) FROM raw_users WHERE process_status IS NULL",
                     Long::class.java
                 ) ?: 0L
 
@@ -74,15 +76,15 @@ class PartitionUserMigrationBatchConfig {
     @StepScope
     fun partitionReader(
         dataSource: DataSource,
-        @org.springframework.beans.factory.annotation.Value("#{stepExecutionContext[minValue]}") minValue: Long,
-        @org.springframework.beans.factory.annotation.Value("#{stepExecutionContext[maxValue]}") maxValue: Long
+        @Value("#{stepExecutionContext[minValue]}") minValue: Long,
+        @Value("#{stepExecutionContext[maxValue]}") maxValue: Long
     ): JdbcPagingItemReader<RawUser> {
 
         val provider = H2PagingQueryProvider()
         provider.setSelectClause("SELECT id, username, email, password, status")
         provider.setFromClause("FROM raw_users")
         provider.setWhereClause(
-            "WHERE processed = false AND id BETWEEN $minValue AND $maxValue"
+            "WHERE process_status IS NULL AND id BETWEEN $minValue AND $maxValue"
         )
         provider.setSortKeys(mapOf("id" to Order.ASCENDING))
 
@@ -106,8 +108,16 @@ class PartitionUserMigrationBatchConfig {
     // PROCESSOR
     // =========================
     @Bean
-    fun partitionProcessor(): ItemProcessor<RawUser, User> =
-        ItemProcessor { raw ->
+    fun partitionProcessor(dataSource: DataSource): ItemProcessor<RawUser, User> {
+        val jdbc = JdbcTemplate(dataSource)
+
+        return ItemProcessor { raw ->
+            jdbc.update("""
+                UPDATE raw_users
+                SET process_status = 'PROCESSING'
+                WHERE id = ?
+            """.trimIndent(), raw.id)
+
             User(
                 rawId = raw.id,
                 username = raw.username,
@@ -116,6 +126,7 @@ class PartitionUserMigrationBatchConfig {
                 status = raw.status
             )
         }
+    }
 
     // =========================
     // WRITER
@@ -133,26 +144,12 @@ class PartitionUserMigrationBatchConfig {
     }
 
     @Bean
-    fun partitionRawUpdateWriter(dataSource: DataSource): JdbcBatchItemWriter<User> {
-        return JdbcBatchItemWriterBuilder<User>()
-            .dataSource(dataSource)
-            .sql("""
-                UPDATE raw_users
-                SET processed = true
-                WHERE id = :rawId
-            """.trimIndent())
-            .beanMapped()
-            .build()
-    }
-
-    @Bean
     fun partitionCompositeWriter(
-        partitionUserWriter: JdbcBatchItemWriter<User>,
-        partitionRawUpdateWriter: JdbcBatchItemWriter<User>
+        partitionUserWriter: JdbcBatchItemWriter<User>
     ): CompositeItemWriter<User> {
 
         return CompositeItemWriter<User>().apply {
-            setDelegates(listOf(partitionUserWriter, partitionRawUpdateWriter))
+            setDelegates(listOf(partitionUserWriter,))
         }
     }
 
@@ -165,7 +162,9 @@ class PartitionUserMigrationBatchConfig {
         transactionManager: PlatformTransactionManager,
         partitionReader: ItemReader<RawUser>,
         partitionProcessor: ItemProcessor<RawUser, User>,
-        partitionCompositeWriter: ItemWriter<User>
+        partitionCompositeWriter: ItemWriter<User>,
+        rawUserSuccessListener: RawUserSuccessListener,
+        rawUserFailureListener: RawUserFailureListener
     ): Step {
 
         return StepBuilder(WORKER_STEP_NAME, jobRepository)
@@ -173,6 +172,11 @@ class PartitionUserMigrationBatchConfig {
             .reader(partitionReader)
             .processor(partitionProcessor)
             .writer(partitionCompositeWriter)
+            .listener(rawUserSuccessListener)
+            .listener(rawUserFailureListener)
+            .faultTolerant()
+            .skip(Exception::class.java)
+            .skipLimit(Long.MAX_VALUE)
             .transactionManager(transactionManager)
             .build()
     }
@@ -183,11 +187,12 @@ class PartitionUserMigrationBatchConfig {
     @Bean
     fun masterStep(
         jobRepository: JobRepository,
-        workerStep: Step
+        workerStep: Step,
+        partitioner: UserIdRangePartitioner
     ): Step {
 
         return StepBuilder(MASTER_STEP_NAME, jobRepository)
-            .partitioner(WORKER_STEP_NAME, UserIdRangePartitioner())
+            .partitioner(WORKER_STEP_NAME, partitioner)
             .step(workerStep)
             .gridSize(10)
             .taskExecutor(taskExecutor())

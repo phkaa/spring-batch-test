@@ -5,7 +5,9 @@ CREATE TABLE raw_users (
     email VARCHAR(100) NOT NULL,
     password VARCHAR(255) NOT NULL,
     status VARCHAR(20) DEFAULT 'ACTIVE',
-    processed BOOLEAN DEFAULT FALSE,
+    process_status VARCHAR(20) NULL,   -- NULL / PROCESSING / SUCCESS / FAILURE
+    error_message TEXT NULL,
+    processed_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

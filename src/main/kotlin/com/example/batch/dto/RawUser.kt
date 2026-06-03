@@ -5,5 +5,5 @@ data class RawUser(
     val username: String,
     val email: String,
     val password: String,
-    val status: String
+    val status: String,
 )
