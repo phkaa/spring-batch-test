@@ -18,7 +18,6 @@ import org.springframework.batch.infrastructure.item.support.CompositeItemWriter
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Primary
 import org.springframework.transaction.PlatformTransactionManager
 import java.io.Writer
 import javax.sql.DataSource
@@ -27,11 +26,11 @@ import javax.sql.DataSource
 @EnableBatchProcessing
 class SingleThreadUserMigrationBatchConfig {
     private val PAGE_SIZE: Int = 1000
-    private val CHUNK_SIZE: Int = 1000
+    private val CHUNK_SIZE: Int = 100
     private val STEP_NAME: String = "single-thread-user-mig-step"
 
     @Bean
-    fun reader(dataSource: DataSource): JdbcPagingItemReader<RawUser> {
+    fun singleThreadReader(dataSource: DataSource): JdbcPagingItemReader<RawUser> {
         val provider = H2PagingQueryProvider()
         provider.setSelectClause("SELECT id, username, email, password, status")
         provider.setFromClause("FROM raw_users")
@@ -54,7 +53,7 @@ class SingleThreadUserMigrationBatchConfig {
     }
 
     @Bean
-    fun processor(): ItemProcessor<RawUser, User> {
+    fun singleThreadProcessor(): ItemProcessor<RawUser, User> {
         return ItemProcessor { raw ->
             User(
                 rawId = raw.id,
@@ -67,7 +66,7 @@ class SingleThreadUserMigrationBatchConfig {
     }
 
     @Bean
-    fun userWriter(dataSource: DataSource): JdbcBatchItemWriter<User> {
+    fun singleThreadUserWriter(dataSource: DataSource): JdbcBatchItemWriter<User> {
         return JdbcBatchItemWriterBuilder<User>()
             .dataSource(dataSource)
             .sql("""
@@ -79,7 +78,7 @@ class SingleThreadUserMigrationBatchConfig {
     }
 
     @Bean
-    fun rawUpdateWriter(dataSource: DataSource): JdbcBatchItemWriter<User> {
+    fun singleThreadRawUpdateWriter(dataSource: DataSource): JdbcBatchItemWriter<User> {
         return JdbcBatchItemWriterBuilder<User>()
             .dataSource(dataSource)
             .sql("""
@@ -92,12 +91,12 @@ class SingleThreadUserMigrationBatchConfig {
     }
 
     @Bean
-    fun compositeWriter(
-        userWriter: JdbcBatchItemWriter<User>,
-        rawUpdateWriter: JdbcBatchItemWriter<User>
+    fun singleThreadCompositeWriter(
+        singleThreadUserWriter: JdbcBatchItemWriter<User>,
+        singleThreadRawUpdateWriter: JdbcBatchItemWriter<User>
     ): CompositeItemWriter<User> {
         val writer = CompositeItemWriter<User>()
-        writer.setDelegates(listOf(userWriter, rawUpdateWriter))
+        writer.setDelegates(listOf(singleThreadUserWriter, singleThreadRawUpdateWriter))
         return writer
     }
 
@@ -105,15 +104,15 @@ class SingleThreadUserMigrationBatchConfig {
     fun step(
         jobRepository: JobRepository,
         transactionManager: PlatformTransactionManager,
-        reader: ItemReader<RawUser>,
-        processor: ItemProcessor<RawUser, User>,
-        @Qualifier("compositeWriter") writer: ItemWriter<User>
+        singleThreadReader: ItemReader<RawUser>,
+        singleThreadProcessor: ItemProcessor<RawUser, User>,
+        singleThreadCompositeWriter: ItemWriter<User>,
     ): Step {
         return StepBuilder(STEP_NAME, jobRepository)
             .chunk<RawUser, User>(CHUNK_SIZE)
-            .reader(reader)
-            .processor(processor)
-            .writer(writer)
+            .reader(singleThreadReader)
+            .processor(singleThreadProcessor)
+            .writer(singleThreadCompositeWriter)
             .transactionManager(transactionManager)
             .build()
     }

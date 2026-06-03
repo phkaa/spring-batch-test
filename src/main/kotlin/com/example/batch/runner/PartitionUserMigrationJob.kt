@@ -10,18 +10,20 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 
 @Configuration
-class SingleThreadUserMigrationJob(
+class PartitionUserMigrationJob(
 ) {
-    private val JOB_NAME: String = "single-thread-user-mig-job"
+    private val JOB_NAME: String = "partition-user-mig-job"
 
     @Bean
-    fun singleThreadJob(
+    fun partitionJob(
         jobRepository: JobRepository,
-        step: Step
+        maxIdStep: Step,
+        masterStep: Step
     ): Job {
         return JobBuilder(JOB_NAME, jobRepository)
             .incrementer(RunIdIncrementer())
-            .start(step)
+            .start(maxIdStep)
+            .next(masterStep)
             .build()
     }
 }
