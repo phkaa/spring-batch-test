@@ -11,13 +11,22 @@ class RawUserSuccessListener(
     private val jdbcTemplate: JdbcTemplate
 ): ItemWriteListener<User> {
     override fun afterWrite(items: Chunk<out User>) {
-        items.forEach { user ->
-            jdbcTemplate.update("""
+        val ids = items.items.map { it.rawId }
+
+        if (ids.isEmpty()) {
+            return
+        }
+
+        val placeholders = ids.joinToString(",") { "?" }
+
+        jdbcTemplate.update(
+            """
                 UPDATE raw_users
                 SET process_status = 'SUCCESS',
                     processed_at = NOW()
-                WHERE id = ?
-            """.trimIndent(), user.rawId)
-        }
+                WHERE id IN ($placeholders)
+                """.trimIndent(),
+            *ids.toTypedArray()
+        )
     }
 }

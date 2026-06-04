@@ -188,11 +188,11 @@ class PartitionUserMigrationBatchConfig {
     fun masterStep(
         jobRepository: JobRepository,
         workerStep: Step,
-        partitioner: UserIdRangePartitioner
+        userIdRangePartitioner: UserIdRangePartitioner
     ): Step {
 
         return StepBuilder(MASTER_STEP_NAME, jobRepository)
-            .partitioner(WORKER_STEP_NAME, partitioner)
+            .partitioner(WORKER_STEP_NAME, userIdRangePartitioner)
             .step(workerStep)
             .gridSize(10)
             .taskExecutor(taskExecutor())

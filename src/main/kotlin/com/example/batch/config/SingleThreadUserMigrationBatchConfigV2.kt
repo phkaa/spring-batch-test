@@ -17,6 +17,7 @@ import org.springframework.batch.infrastructure.item.database.Order
 import org.springframework.batch.infrastructure.item.database.builder.JdbcBatchItemWriterBuilder
 import org.springframework.batch.infrastructure.item.database.support.H2PagingQueryProvider
 import org.springframework.batch.infrastructure.item.support.CompositeItemWriter
+import org.springframework.batch.infrastructure.repeat.RepeatStatus
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.JdbcTemplate
@@ -25,17 +26,42 @@ import javax.sql.DataSource
 
 @Configuration
 @EnableBatchProcessing
-class SingleThreadUserMigrationBatchConfig {
+class SingleThreadUserMigrationBatchConfigV2 {
     private val PAGE_SIZE: Int = 1000
     private val CHUNK_SIZE: Int = 100
-    private val STEP_NAME: String = "single-thread-user-mig-step"
+    private val STEP_NAME: String = "single-thread-user-mig-step-v2"
+    private val MARK_STEP_NAME: String = "mark-processing-step"
 
     @Bean
-    fun singleThreadReader(dataSource: DataSource): JdbcPagingItemReader<RawUser> {
+    fun markProcessingStep(
+        jobRepository: JobRepository,
+        transactionManager: PlatformTransactionManager,
+        dataSource: DataSource
+    ): Step {
+        val jdbcTemplate = JdbcTemplate(dataSource)
+
+        return StepBuilder(MARK_STEP_NAME, jobRepository)
+            .tasklet({ _, _ ->
+
+                val count = jdbcTemplate.update("""
+                    UPDATE raw_users
+                    SET process_status = 'PROCESSING'
+                    WHERE process_status IS NULL
+                """.trimIndent())
+
+                println("PROCESSING 변경 건수 : $count")
+
+                RepeatStatus.FINISHED
+            }, transactionManager)
+            .build()
+    }
+
+    @Bean
+    fun singleThreadReaderV2(dataSource: DataSource): JdbcPagingItemReader<RawUser> {
         val provider = H2PagingQueryProvider()
         provider.setSelectClause("SELECT id, username, email, password, status")
         provider.setFromClause("FROM raw_users")
-        provider.setWhereClause("WHERE process_status IS NULL")
+        provider.setWhereClause("WHERE process_status = 'PROCESSING'")
         provider.setSortKeys(mapOf("id" to Order.ASCENDING))
 
         val reader = JdbcPagingItemReader<RawUser>(dataSource, provider)
@@ -54,16 +80,8 @@ class SingleThreadUserMigrationBatchConfig {
     }
 
     @Bean
-    fun singleThreadProcessor(dataSource: DataSource): ItemProcessor<RawUser, User> {
-        val jdbc = JdbcTemplate(dataSource)
-
+    fun singleThreadProcessorV2(): ItemProcessor<RawUser, User> {
         return ItemProcessor { raw ->
-            jdbc.update("""
-                UPDATE raw_users
-                SET process_status = 'PROCESSING'
-                WHERE id = ?
-            """.trimIndent(), raw.id)
-
             User(
                 rawId = raw.id,
                 username = raw.username,
@@ -75,40 +93,19 @@ class SingleThreadUserMigrationBatchConfig {
     }
 
     @Bean
-    fun singleThreadUserWriter(dataSource: DataSource): JdbcBatchItemWriter<User> {
-        return JdbcBatchItemWriterBuilder<User>()
-            .dataSource(dataSource)
-            .sql("""
-                INSERT INTO users (username, email, password, status)
-                VALUES (:username, :email, :password, :status)
-            """.trimIndent())
-            .beanMapped()
-            .build()
-    }
-
-    @Bean
-    fun singleThreadCompositeWriter(
-        singleThreadUserWriter: JdbcBatchItemWriter<User>,
-    ): CompositeItemWriter<User> {
-        val writer = CompositeItemWriter<User>()
-        writer.setDelegates(listOf(singleThreadUserWriter))
-        return writer
-    }
-
-    @Bean
-    fun singleThreadStep(
+    fun singleThreadStepV2(
         jobRepository: JobRepository,
         transactionManager: PlatformTransactionManager,
-        singleThreadReader: ItemReader<RawUser>,
-        singleThreadProcessor: ItemProcessor<RawUser, User>,
+        singleThreadReaderV2: ItemReader<RawUser>,
+        singleThreadProcessorV2: ItemProcessor<RawUser, User>,
         singleThreadCompositeWriter: ItemWriter<User>,
         rawUserSuccessListener: RawUserSuccessListener,
         rawUserFailureListener: RawUserFailureListener
     ): Step {
         return StepBuilder(STEP_NAME, jobRepository)
             .chunk<RawUser, User>(CHUNK_SIZE)
-            .reader(singleThreadReader)
-            .processor(singleThreadProcessor)
+            .reader(singleThreadReaderV2)
+            .processor(singleThreadProcessorV2)
             .writer(singleThreadCompositeWriter)
             .listener(rawUserSuccessListener)
             .listener(rawUserFailureListener)

@@ -43,8 +43,25 @@
 Reader → Processor → Writer
 
 ---
+## 2. Early Status Change & Single Thread Batch
 
-## 2. Partitioned Batch
+배치 실행 전 처리 대상 데이터를 한 번에 `PROCESSING` 상태로 변경한 후, 단일 스레드 기반으로 순차 처리하는 배치입니다.
+
+### 특징
+- 배치 시작 시 미처리 데이터를 `PROCESSING` 상태로 선점
+- 단일 스레드 기반 순차 처리
+- Chunk 단위 트랜잭션 처리
+- `process_status` 기반 처리 상태 관리
+- 처리 성공 시 `SUCCESS` 상태로 변경
+- 처리 실패 시 `FAILURE` 상태 및 오류 메시지 기록
+- Reader, Processor, Writer 역할 분리
+
+### Flow
+MarkProcessingStep → Reader → Processor → Writer
+
+---
+
+## 3. Partitioned Batch
 
 ID 범위를 기준으로 데이터를 분할하여 여러 스레드에서 병렬 처리하는 방식입니다.
 
@@ -70,6 +87,9 @@ JDBC URL: jdbc:h2:mem:testdb
 
 ## Single Thread Batch
 --spring.batch.job.name=single-thread-user-mig-job
+
+## Early Status Change & Single Thread Batch
+--spring.batch.job.name=single-thread-user-mig-job-v2
 
 ## Partition Batch
 --spring.batch.job.name=partition-user-mig-job
