@@ -108,16 +108,8 @@ class PartitionUserMigrationBatchConfig {
     // PROCESSOR
     // =========================
     @Bean
-    fun partitionProcessor(dataSource: DataSource): ItemProcessor<RawUser, User> {
-        val jdbc = JdbcTemplate(dataSource)
-
+    fun partitionProcessor(): ItemProcessor<RawUser, User> {
         return ItemProcessor { raw ->
-            jdbc.update("""
-                UPDATE raw_users
-                SET process_status = 'PROCESSING'
-                WHERE id = ?
-            """.trimIndent(), raw.id)
-
             User(
                 rawId = raw.id,
                 username = raw.username,
@@ -143,13 +135,33 @@ class PartitionUserMigrationBatchConfig {
             .build()
     }
 
+    // =========================
+    // RAW STATUS WRITER
+    // =========================
+    @Bean
+    fun partitionRawUserStatusWriter(
+        dataSource: DataSource
+    ): JdbcBatchItemWriter<User> {
+
+        return JdbcBatchItemWriterBuilder<User>()
+            .dataSource(dataSource)
+            .sql("""
+                UPDATE raw_users
+                SET process_status = 'PROCESSING'
+                WHERE id = :rawId
+            """)
+            .beanMapped()
+            .build()
+    }
+
     @Bean
     fun partitionCompositeWriter(
+        partitionRawUserStatusWriter: JdbcBatchItemWriter<User>,
         partitionUserWriter: JdbcBatchItemWriter<User>
     ): CompositeItemWriter<User> {
 
         return CompositeItemWriter<User>().apply {
-            setDelegates(listOf(partitionUserWriter,))
+            setDelegates(listOf(partitionRawUserStatusWriter, partitionUserWriter))
         }
     }
 
